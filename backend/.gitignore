@@ -12,3 +12,4 @@ ENV/
 htmlcov/
 *.log
 .env
+relatorio_asac.pdf
