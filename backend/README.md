@@ -15,7 +15,8 @@ backend/
 │   │   │   ├── metrics.py       # /api/metrics/model
 │   │   │   ├── news.py          # /api/news
 │   │   │   ├── prices.py        # /api/prices
-│   │   │   └── reports.py       # /api/reports
+│   │   │   ├── reports.py       # /api/reports
+│   │   │   └── charts.py        # /api/reports/chart (gráficos PNG gerados na hora)
 │   │   └── router.py            # Agregador de rotas com prefixo /api
 │   ├── core/
 │   │   ├── config.py            # Configurações de ambiente e CORS
@@ -23,9 +24,15 @@ backend/
 │   ├── schemas/                 # Modelos Pydantic de validação
 │   ├── services/
 │   │   ├── data_loader.py       # Leitura e limpeza dos CSVs
+│   │   ├── analise.py           # Correlação sentimento x preço (Pearson/Spearman)
+│   │   ├── metricas_modelo.py   # Reavaliação da Estratégia 2 (CV e pseudo-label)
+│   │   ├── graficos.py          # Geração dos gráficos (matplotlib)
+│   │   ├── relatorio.py         # Monta o PDF consumindo as próprias rotas da API
 │   │   └── llm_service.py       # Geração de resumos IA + cache em SQLite
 │   ├── tests/
-│   │   └── test_api.py          # Testes com TestClient
+│   │   ├── test_api.py          # Testes com TestClient
+│   │   ├── test_data_loader.py  # Testes de leitura e limpeza dos dados
+│   │   └── test_analise.py      # Testes do cálculo de correlação
 │   ├── __init__.py
 │   └── main.py                  # Ponto de entrada FastAPI com CORS
 ├── data/
@@ -44,19 +51,32 @@ backend/
 
 ## ⚙️ Como Executar
 
-### 1. Instalar dependências
+### 1. Criar e ativar o ambiente virtual
+```bash
+python -m venv .venv
+```
+Windows:
+```bash
+.venv\Scripts\activate
+```
+Linux/Mac:
+```bash
+source .venv/bin/activate
+```
+
+### 2. Instalar dependências
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Gerar / Atualizar o Banco de Dados
+### 3. Gerar / Atualizar o Banco de Dados
 Lê os CSVs em `data/`, limpa e monta o banco `noticias_cepea.db` do zero (apaga e recria se já existir):
 ```bash
 python build_db.py
 ```
 No final executa um teste de integridade e imprime `integridade ok`.
 
-### 3. Iniciar o servidor da API
+### 4. Iniciar o servidor da API
 ```bash
 uvicorn app.main:app --reload
 ```
@@ -65,10 +85,24 @@ Documentação interativa disponível em:
 - **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
-### 4. Rodar Testes Automatizados
+### 5. Rodar Testes Automatizados
 ```bash
-python -m unittest app/tests/test_api.py
+python -m pytest app/tests/ -v
 ```
+Cobre os testes da API (`test_api.py`), da leitura/limpeza dos dados (`test_data_loader.py`) e do cálculo de correlação (`test_analise.py`).
+
+### 6. Reavaliar as métricas do modelo
+Recalcula a acurácia da Estratégia 2 (validação cruzada e pseudo-labeling do léxico) e grava em `metricas_modelo` / `metricas_por_classe`:
+```bash
+python app/services/metricas_modelo.py
+```
+
+### 7. Gerar o relatório em PDF
+Com a API rodando (passo 4), monta um PDF consumindo as próprias rotas (`/api/reports`, `/api/analysis/summary`, `/api/reports/chart/*`):
+```bash
+python -m app.services.relatorio
+```
+Gera `relatorio_asac.pdf` na pasta `backend/`.
 
 ---
 
@@ -85,6 +119,8 @@ python -m unittest app/tests/test_api.py
 | `GET` | `/api/analysis/correlation` | Coeficientes por mercado, praça e defasagem (0 a 5 dias) |
 | `GET` | `/api/analysis/summary` | Resumo analítico com IA (cache na tabela `resumos`) |
 | `GET` | `/api/reports` | Relatório consolidado analítico |
+| `GET` | `/api/reports/chart/timeseries` | Gráfico (PNG) de série temporal sentimento x preço |
+| `GET` | `/api/reports/chart/correlation` | Gráfico (PNG) de correlação por defasagem |
 
 ---
 
@@ -111,3 +147,20 @@ python -m unittest app/tests/test_api.py
 - `vw_sentimento_semanal` — contagem de sentimento agregada por semana
 - `vw_preco_x_sentimento` — sentimento diário já cruzado com o preço da praça correspondente
 `data_pregao` é o próximo dia de pregão CEPEA depois da publicação da notícia — é assim que notícia e preço são cruzados, já que notícia sai todo dia e preço só em dia útil.
+
+---
+
+## 📈 Métricas do modelo de classificação
+
+A acurácia originalmente reportada para a Estratégia 2 (TF-IDF + ML Otimizado, 59%) foi calculada
+avaliando o modelo nos mesmos dados em que foi treinado — um vazamento que infla o resultado.
+`metricas_modelo.py` reavalia a Estratégia 2 de duas formas, sem esse vazamento, e grava as duas no banco:
+
+- **Validação cruzada (5-fold)**: TF-IDF no título treinado direto com `Análise Manual`, avaliado com
+  `StratifiedKFold`.
+- **Pseudo-labeling**: réplica do desenho original da estratégia — treina com os pseudo-rótulos do
+  léxico (Estratégia 1) em cima do texto completo (~5.700 notícias), e testa nas 611 notícias com
+  rótulo manual, que o modelo nunca viu durante o treino.
+
+Os dois resultados ficam em `metricas_modelo` (acurácia/F1 geral) e `metricas_por_classe` (detalhado
+por classe), disponíveis via `GET /api/metrics/model`.
