@@ -1,25 +1,31 @@
 import sqlite3
 from typing import List, Dict, Any
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from app.core.database import get_db
 
 router = APIRouter(prefix="/metrics", tags=["Metrics"])
 
 @router.get("/model", summary="Métricas gerais e por classe do modelo de classificação")
 def get_model_metrics(db: sqlite3.Connection = Depends(get_db)) -> Dict[str, Any]:
-    metricas_gerais = db.execute(
-        """
-        SELECT estrategia, acuracia, precisao, recall, f1, tempo_execucao, amostras, metodo_avaliacao
-        FROM metricas_modelo
-        """
-    ).fetchall()
+    try:
+        metricas_gerais = db.execute(
+            """
+            SELECT estrategia, acuracia, precisao, recall, f1, tempo_execucao, amostras, metodo_avaliacao
+            FROM metricas_modelo
+            """
+        ).fetchall()
 
-    metricas_classes = db.execute(
-        """
-        SELECT estrategia, classe, precisao, recall, f1, suporte
-        FROM metricas_por_classe
-        """
-    ).fetchall()
+        metricas_classes = db.execute(
+            """
+            SELECT estrategia, classe, precisao, recall, f1, suporte
+            FROM metricas_por_classe
+            """
+        ).fetchall()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao consultar métricas do modelo: {str(e)}"
+        )
 
     # Caso o módulo de métricas ainda esteja sendo populado pelo time de ML/análise
     dados_gerais = [dict(row) for row in metricas_gerais]

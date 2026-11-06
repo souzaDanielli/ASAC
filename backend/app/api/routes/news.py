@@ -1,7 +1,7 @@
 import sqlite3
 import math
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.database import get_db
 from app.schemas.extra import PaginatedNewsResponse
 
@@ -11,13 +11,16 @@ router = APIRouter(prefix="/news", tags=["News"])
 def list_news(
     page: int = Query(default=1, ge=1, description="Número da página"),
     page_size: int = Query(default=20, ge=1, le=100, description="Itens por página"),
-    mercado: Optional[str] = Query(default=None, description="Filtro por mercado (interno ou externo)"),
-    sentimento: Optional[str] = Query(default=None, description="Filtro por sentimento (positivo, negativo, neutro)"),
-    data_inicio: Optional[str] = Query(default=None, description="Data início no formato YYYY-MM-DD"),
-    data_fim: Optional[str] = Query(default=None, description="Data fim no formato YYYY-MM-DD"),
-    origem_rotulo: Optional[str] = Query(default=None, description="Origem do rótulo (manual ou modelo)"),
+    mercado: Optional[str] = Query(default=None, pattern="^(?i)(interno|externo)$", description="Filtro por mercado (interno ou externo)"),
+    sentimento: Optional[str] = Query(default=None, pattern="^(?i)(positivo|negativo|neutro)$", description="Filtro por sentimento (positivo, negativo, neutro)"),
+    data_inicio: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Data início no formato YYYY-MM-DD"),
+    data_fim: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Data fim no formato YYYY-MM-DD"),
+    origem_rotulo: Optional[str] = Query(default=None, pattern="^(?i)(manual|modelo)$", description="Origem do rótulo (manual ou modelo)"),
     db: sqlite3.Connection = Depends(get_db)
 ):
+    if data_inicio and data_fim and data_inicio > data_fim:
+        raise HTTPException(status_code=400, detail="O parâmetro 'data_inicio' não pode ser posterior a 'data_fim'.")
+
     query = "SELECT * FROM noticias WHERE 1=1"
     params = []
 
@@ -41,14 +44,18 @@ def list_news(
         query += " AND LOWER(origem_rotulo) = LOWER(?)"
         params.append(origem_rotulo)
 
-    count_query = f"SELECT COUNT(*) FROM ({query})"
-    total = db.execute(count_query, params).fetchone()[0]
+    try:
+        count_query = f"SELECT COUNT(*) FROM ({query})"
+        total = db.execute(count_query, params).fetchone()[0]
 
-    offset = (page - 1) * page_size
-    query += " ORDER BY data DESC LIMIT ? OFFSET ?"
-    params.extend([page_size, offset])
+        offset = (page - 1) * page_size
+        query += " ORDER BY data DESC LIMIT ? OFFSET ?"
+        params.extend([page_size, offset])
 
-    rows = db.execute(query, params).fetchall()
+        rows = db.execute(query, params).fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao consultar notícias no banco de dados: {str(e)}")
+
     items = [dict(row) for row in rows]
     total_pages = math.ceil(total / page_size) if total > 0 else 0
 
