@@ -86,10 +86,15 @@ Documentação interativa disponível em:
 - **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
 ### 5. Rodar Testes Automatizados
+Com `pytest` (executa `test_api.py`, `test_data_loader.py` e `test_analise.py`):
 ```bash
 python -m pytest app/tests/ -v
 ```
-Cobre os testes da API (`test_api.py`), da leitura/limpeza dos dados (`test_data_loader.py`) e do cálculo de correlação (`test_analise.py`).
+Ou diretamente com `unittest` (biblioteca padrão do Python, sem dependências extras de runner):
+```bash
+python -m unittest app/tests/test_api.py -v
+```
+A suíte valida respostas de **sucesso (`200 OK`)** e de **erro (`400`, `405`, `422`, `500`)** para todos os 12 endpoints da API, além dos testes unitários de limpeza de dados e cálculo de correlação.
 
 ### 6. Reavaliar as métricas do modelo
 Recalcula a acurácia da Estratégia 2 (validação cruzada e pseudo-labeling do léxico) e grava em `metricas_modelo` / `metricas_por_classe`:
@@ -105,6 +110,26 @@ python -m app.services.relatorio
 Gera `relatorio_asac.pdf` na pasta `backend/`.
 
 ---
+
+## Arquitetura da API
+
+A API foi desenhada em **arquitetura em camadas (Layered Architecture)** sobre o **FastAPI**, separando responsabilidades:
+
+1. **Camada de Apresentação / Rotas (`app/api/routes/` e `app/api/router.py`)**
+   - Recebe as requisições HTTP sob o prefixo `/api` (e `/` na raiz), realiza a validação de parâmetros de entrada via `Query` do FastAPI e serializa as respostas usando modelos Pydantic.
+2. **Camada de Contratos / Schemas (`app/schemas/`)**
+   - Modelos **Pydantic v2** (`HealthResponse`, `MethodsResponse`, `PaginatedNewsResponse`, `PrecoResponse`, `CorrelationResponse`, `ReportResponse`, etc.) que garantem tipagem estrita e documentação OpenAPI automática (`/docs` e `/redoc`).
+3. **Camada de Serviços / Domínio (`app/services/`)**
+   - Contém toda a regra de negócio e processamento científico isolados do protocolo HTTP:
+     - `data_loader.py`: ingestão, deduplicação e higienização dos CSVs brutos.
+     - `analise.py`: cálculo estatístico de correlação de Pearson e Spearman com defasagens temporais ($t+0$ a $t+5$) e cache em memória (`@lru_cache`).
+     - `metricas_modelo.py`: avaliação livre de *data leakage* (Validação Cruzada Estratificada 5-fold e Holdout com Pseudo-labeling).
+     - `llm_service.py`: geração de resumos executivos com IA (Gemini) ou fallback determinístico por template, com persistência em cache SQLite e trava explícita contra inferência de causalidade.
+     - `graficos.py` e `relatorio.py`: renderização de gráficos em PNG (`matplotlib`) e compilação autônoma do relatório executivo em PDF.
+4. **Camada de Persistência e Infraestrutura (`app/core/`)**
+   - `config.py`: gerenciamento centralizado de variáveis de ambiente (`.env`) e políticas de CORS.
+   - `database.py`: injeção de dependência (`Depends(get_db)`) do SQLite configurado com `PRAGMA journal_mode=WAL` e `busy_timeout=5000` para leituras concorrentes seguras.
+
 
 ## 🚀 Endpoints da API
 

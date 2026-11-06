@@ -23,6 +23,31 @@ npm run build
 
 ---
 
+## 📁 Estrutura de Pastas
+
+```text
+frontend/
+├── src/
+│   ├── api/
+│   │   └── client.js            # Cliente HTTP centralizado para consumo da API FastAPI
+│   ├── components/
+│   │   ├── Header.jsx           # Cabeçalho institucional e navegação entre abas
+│   │   ├── OverviewTab.jsx      # Aba 1: KPIs, Série Temporal, Correlação e Resumo IA
+│   │   ├── NewsTab.jsx          # Aba 2: Listagem paginada de notícias, filtros e modal
+│   │   ├── MethodsTab.jsx       # Aba 3: Pipeline metodológico e métricas de ML
+│   │   └── ReportsTab.jsx       # Aba 4: Relatório executivo consolidado e exportação PDF
+│   ├── App.jsx                  # Gerenciamento de estado global da aba ativa
+│   ├── main.jsx                 # Ponto de entrada React
+│   └── index.css                # Diretivas Tailwind CSS e estilos de impressão (@media print)
+├── .env.example
+├── index.html
+├── package.json
+├── tailwind.config.js
+└── vite.config.js
+```
+
+---
+
 ## 🎨 Estrutura das Abas e Componentes
 
 1. **Visão geral (`OverviewTab.jsx`)**
