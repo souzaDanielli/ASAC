@@ -1,4 +1,4 @@
-import io
+rimport io
 from datetime import datetime
 from pathlib import Path
 
@@ -11,20 +11,35 @@ BASE_URL = "http://localhost:8000/api"
 SAIDA_PDF = Path(__file__).resolve().parents[2] / "relatorio_asac.pdf"
 
 
-def buscar_dados_relatorio():
-    resp = httpx.get(f"{BASE_URL}/reports", timeout=30)
+def _get_client():
+    """Retorna um cliente HTTPx se o servidor estiver rodando, ou TestClient in-process se estiver offline."""
+    try:
+        resp = httpx.get("http://localhost:8000/api/health", timeout=1.5)
+        if resp.status_code == 200:
+            return httpx.Client(base_url="http://localhost:8000/api", timeout=30.0)
+    except Exception:
+        pass
+
+    # Modo autônomo offline: executa as rotas diretamente via FastAPI TestClient
+    from fastapi.testclient import TestClient
+    from app.main import app
+    return TestClient(app, base_url="http://testserver/api")
+
+
+def buscar_dados_relatorio(client):
+    resp = client.get("/reports")
     resp.raise_for_status()
     return resp.json()
 
 
-def buscar_resumo(praca):
-    resp = httpx.get(f"{BASE_URL}/analysis/summary", params={"praca": praca}, timeout=30)
+def buscar_resumo(client, praca):
+    resp = client.get("/analysis/summary", params={"praca": praca})
     resp.raise_for_status()
     return resp.json()
 
 
-def buscar_grafico(rota):
-    resp = httpx.get(f"{BASE_URL}/reports/chart/{rota}", timeout=30)
+def buscar_grafico(client, rota):
+    resp = client.get(f"/reports/chart/{rota}")
     resp.raise_for_status()
     return io.BytesIO(resp.content)
 
@@ -37,7 +52,9 @@ def _data_formatada(iso):
 
 
 def _quebrar_linha(texto, largura):
-    palavras = texto.split()
+    if not texto:
+        return []
+    palavras = str(texto).split()
     linhas, atual = [], ""
     for palavra in palavras:
         if len(atual) + len(palavra) + 1 > largura:
@@ -67,19 +84,20 @@ def pagina_texto(dados, resumos_por_praca):
     largura_coluna = 100
     y = 0.93
 
-    for linha in _quebrar_linha(dados["titulo"], 45):
+    for linha in _quebrar_linha(dados.get("titulo", "Relatório ASAC"), 45):
         eixo.text(margem_esq, y, linha, fontsize=20, fontweight="bold", color=COR_TITULO, va="top")
         y -= 0.05
     y -= 0.005
-    eixo.text(margem_esq, y, f"Gerado em {_data_formatada(dados['gerado_em'])}", fontsize=10, color="#777777", va="top")
+    eixo.text(margem_esq, y, f"Gerado em {_data_formatada(dados.get('gerado_em', ''))}", fontsize=10, color="#777777", va="top")
     y -= 0.03
     eixo.axhline(y, xmin=margem_esq, xmax=1 - margem_esq, color=COR_LINHA, linewidth=1)
     y -= 0.045
 
+    periodo = dados.get("periodo_dados", {})
     indicadores = (
-        f"{dados['total_noticias']} notícias analisadas  •  {dados['total_pregoes']} pregões CEPEA  •  "
-        f"período {dados['periodo_dados']['noticias_inicio']} a {dados['periodo_dados']['noticias_fim']}"
-    )
+        f"{dados.get('total_noticias', 0):,} notícias analisadas  •  {dados.get('total_pregoes', 0):,} pregões CEPEA  •  "
+        f"período {periodo.get('noticias_inicio', '')} a {periodo.get('noticias_fim', '')}"
+    ).replace(",", ".")
     eixo.text(margem_esq, y, indicadores, fontsize=9.5, color=COR_DESTAQUE, fontweight="bold", va="top")
     y -= 0.055
 
@@ -87,7 +105,8 @@ def pagina_texto(dados, resumos_por_praca):
     for praca, resumo in resumos_por_praca.items():
         eixo.text(margem_esq, y, nomes_praca.get(praca, praca), fontsize=12.5, fontweight="bold", color=COR_TITULO, va="top")
         y -= 0.032
-        for linha in _quebrar_linha(resumo["texto"], largura_coluna):
+        texto_resumo = resumo.get("texto", "")
+        for linha in _quebrar_linha(texto_resumo, largura_coluna):
             eixo.text(margem_esq, y, linha, fontsize=9.5, color=COR_TEXTO, va="top")
             y -= 0.025
         y -= 0.02
@@ -97,14 +116,16 @@ def pagina_texto(dados, resumos_por_praca):
 
     eixo.text(margem_esq, y, "Métricas do modelo de classificação", fontsize=12.5, fontweight="bold", color=COR_TITULO, va="top")
     y -= 0.035
-    for m in dados["metricas_modelo"]:
-        cabecalho = f"▸ {m['estrategia']}"
+    for m in dados.get("metricas_modelo", []):
+        cabecalho = f"▸ {m.get('estrategia', '')}"
         for linha in _quebrar_linha(cabecalho, largura_coluna - 4):
             eixo.text(margem_esq, y, linha, fontsize=9.5, fontweight="bold", color=COR_TEXTO, va="top")
             y -= 0.025
+        acc = f"{m['acuracia']:.2%}" if m.get('acuracia') is not None else "N/D"
+        f1_sc = f"{m['f1']:.2%}" if m.get('f1') is not None else "N/D"
         detalhe = (
-            f"acurácia {m['acuracia']:.2%}  ·  F1 macro {m['f1']:.2%}  ·  "
-            f"{m['amostras']} amostras  ·  {m['metodo_avaliacao']}"
+            f"acurácia {acc}  ·  F1 macro {f1_sc}  ·  "
+            f"{m.get('amostras', 0)} amostras  ·  {m.get('metodo_avaliacao', '')}"
         )
         for linha in _quebrar_linha(detalhe, largura_coluna - 4):
             eixo.text(margem_esq + 0.025, y, linha, fontsize=9, color="#555555", va="top")
@@ -112,7 +133,7 @@ def pagina_texto(dados, resumos_por_praca):
         y -= 0.015
 
     eixo.text(
-        margem_esq, 0.03, "Estudo exploratório.",
+        margem_esq, 0.03, "Estudo exploratório baseado em correlações estatísticas sem pressuposição de causalidade.",
         fontsize=8, color="#999999", style="italic", va="bottom",
     )
     return fig
@@ -129,10 +150,11 @@ def pagina_imagem(png_bytes, titulo):
 
 
 def montar_relatorio(saida=SAIDA_PDF):
-    dados = buscar_dados_relatorio()
-    resumos_por_praca = {praca: buscar_resumo(praca) for praca in ("parana", "paranagua")}
-    png_serie = buscar_grafico("timeseries")
-    png_correlacao = buscar_grafico("correlation")
+    client = _get_client()
+    dados = buscar_dados_relatorio(client)
+    resumos_por_praca = {praca: buscar_resumo(client, praca) for praca in ("parana", "paranagua")}
+    png_serie = buscar_grafico(client, "timeseries")
+    png_correlacao = buscar_grafico(client, "correlation")
 
     with PdfPages(saida) as pdf:
         pdf.savefig(pagina_texto(dados, resumos_por_praca))

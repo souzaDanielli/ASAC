@@ -17,13 +17,12 @@ def get_report(db: sqlite3.Connection = Depends(get_db)):
     metricas_rows = db.execute("SELECT * FROM metricas_modelo").fetchall()
     metricas = [dict(r) for r in metricas_rows]
 
-    resumo_cache = db.execute(
-        "SELECT texto FROM resumos ORDER BY id DESC LIMIT 1"
-    ).fetchone()
     texto_resumo = (
-        resumo_cache["texto"]
-        if resumo_cache
-        else "Relatório consolidado com a série histórica de notícias agrícolas da soja e cotações CEPEA."
+        f"Relatório executivo integrando o acompanhamento temporal de {total_noticias.toLocaleString() if hasattr(total_noticias, 'toLocaleString') else f'{total_noticias:,}'.replace(',', '.')} notícias agrícolas "
+        f"especializadas do setor da soja com {f'{total_pregoes:,}'.replace(',', '.')} pregões de fechamento do indicador CEPEA/ESALQ "
+        f"(mercado interno do Paraná e porto exportador de Paranaguá) no intervalo de {min_max_noticias[0]} a {min_max_noticias[1]}. "
+        f"A estrutura investiga a concomitância estatística entre a polaridade líquida do sentimento textual e a dinâmica de preços, "
+        f"avaliando defasagens temporais sem pressuposição de causalidade determinística."
     )
 
     return ReportResponse(

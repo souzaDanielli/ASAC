@@ -17,60 +17,97 @@ def get_timeseries(
     db: sqlite3.Connection = Depends(get_db)
 ) -> List[Dict[str, Any]]:
     if frequencia == "diario":
-        query = """
-        SELECT
-            data,
-            mercado,
-            praca,
-            qtd_total,
-            indice_sentimento,
-            valor_brl,
-            valor_usd,
-            var_pct
-        FROM vw_preco_x_sentimento
-        WHERE 1=1
-        """
-        params = []
         if mercado:
-            query += " AND LOWER(mercado) = LOWER(?)"
-            params.append(mercado)
+            query = """
+            SELECT
+                data,
+                mercado,
+                praca,
+                qtd_total,
+                indice_sentimento,
+                valor_brl,
+                valor_usd,
+                var_pct
+            FROM vw_preco_x_sentimento
+            WHERE LOWER(mercado) = LOWER(?)
+            """
+            params = [mercado]
+        else:
+            # Agrupa por dia para não duplicar linhas quando mercado for 'todos'
+            query = """
+            SELECT
+                data,
+                'todos' AS mercado,
+                'todos' AS praca,
+                SUM(qtd_total) AS qtd_total,
+                ROUND(AVG(indice_sentimento), 4) AS indice_sentimento,
+                ROUND(AVG(valor_brl), 2) AS valor_brl,
+                ROUND(AVG(valor_usd), 2) AS valor_usd,
+                ROUND(AVG(var_pct), 2) AS var_pct
+            FROM vw_preco_x_sentimento
+            WHERE 1=1
+            """
+            params = []
+
         if data_inicio:
             query += " AND data >= ?"
             params.append(data_inicio)
         if data_fim:
             query += " AND data <= ?"
             params.append(data_fim)
+
+        if not mercado:
+            query += " GROUP BY data"
+
         query += " ORDER BY data ASC"
         rows = db.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
     else:
-        # Semanal via vw_sentimento_semanal
-        query = """
-        SELECT
-            semana,
-            semana_inicio,
-            semana_fim,
-            mercado,
-            qtd_positivo,
-            qtd_neutro,
-            qtd_negativo,
-            qtd_total,
-            indice_sentimento
-        FROM vw_sentimento_semanal
-        WHERE 1=1
-        """
-        params = []
+        # Frequência semanal agregando Preço e Sentimento
         if mercado:
-            query += " AND LOWER(mercado) = LOWER(?)"
-            params.append(mercado)
+            query = """
+            SELECT
+                strftime('%Y-W%W', data) AS semana,
+                MIN(data) AS data,
+                MIN(data) AS semana_inicio,
+                MAX(data) AS semana_fim,
+                mercado,
+                SUM(qtd_total) AS qtd_total,
+                ROUND(AVG(indice_sentimento), 4) AS indice_sentimento,
+                ROUND(AVG(valor_brl), 2) AS valor_brl,
+                ROUND(AVG(valor_usd), 2) AS valor_usd,
+                ROUND(AVG(var_pct), 2) AS var_pct
+            FROM vw_preco_x_sentimento
+            WHERE LOWER(mercado) = LOWER(?)
+            """
+            params = [mercado]
+        else:
+            query = """
+            SELECT
+                strftime('%Y-W%W', data) AS semana,
+                MIN(data) AS data,
+                MIN(data) AS semana_inicio,
+                MAX(data) AS semana_fim,
+                'todos' AS mercado,
+                SUM(qtd_total) AS qtd_total,
+                ROUND(AVG(indice_sentimento), 4) AS indice_sentimento,
+                ROUND(AVG(valor_brl), 2) AS valor_brl,
+                ROUND(AVG(valor_usd), 2) AS valor_usd,
+                ROUND(AVG(var_pct), 2) AS var_pct
+            FROM vw_preco_x_sentimento
+            WHERE 1=1
+            """
+            params = []
+
         if data_inicio:
-            query += " AND semana_inicio >= ?"
+            query += " AND data >= ?"
             params.append(data_inicio)
         if data_fim:
-            query += " AND semana_fim <= ?"
+            query += " AND data <= ?"
             params.append(data_fim)
-        query += " ORDER BY semana ASC"
+
+        query += " GROUP BY semana ORDER BY semana ASC"
         rows = db.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 

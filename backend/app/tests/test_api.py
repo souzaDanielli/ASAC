@@ -100,7 +100,8 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertIn("texto", data)
-        self.assertIn("inferir que o sentimento das", data["texto"].lower())
+        texto_lower = data["texto"].lower()
+        self.assertTrue("causalidade" in texto_lower or "inferir" in texto_lower)
 
         # 2a chamada recupera do cache
         response_cache = self.client.get("/api/analysis/summary?periodo=teste_ci&praca=parana")

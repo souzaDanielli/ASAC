@@ -1,4 +1,5 @@
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -57,8 +58,9 @@ def correlacoes_por_defasagem(sentimento, var_pct_por_data, lags=range(6)):
     return pd.DataFrame(linhas)
 
 
-def rodar(db_path=DB_PATH):
-    conn = sqlite3.connect(db_path)
+@lru_cache(maxsize=8)
+def _rodar_cached(db_path_str: str):
+    conn = sqlite3.connect(db_path_str, timeout=30.0)
     resultados = {}
     for mercado in ("interno", "externo"):
         sentimento = carregar_sentimento(conn, mercado)
@@ -66,6 +68,10 @@ def rodar(db_path=DB_PATH):
         resultados[mercado] = correlacoes_por_defasagem(sentimento, var_pct_por_data)
     conn.close()
     return resultados
+
+
+def rodar(db_path=DB_PATH):
+    return _rodar_cached(str(db_path))
 
 
 if __name__ == "__main__":
